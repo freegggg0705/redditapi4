@@ -37,15 +37,27 @@ async function fetchPosts(clientId, clientSecret, subreddit, sort, limit, timeFi
         let nonMediaPosts = [];
         let after = '';
         let requestCount = 0;
-        const maxRequests = 10; // Prevent excessive API calls
+        const initialMaxRequests = 3; // Stop after 3 requests for popup
+        const totalMaxRequests = 10; // Max if user continues
         const batchSize = Math.max(limit, 25); // Fetch more posts per request
         let baseUrl = `https://oauth.reddit.com/r/${subreddit}/${sort}.json?limit=${batchSize}`;
         if (sort === 'top' && timeFilter) {
             baseUrl += `&t=${timeFilter}`;
         }
 
-        // Keep fetching until we have 'limit' media posts or no more posts are available
-        while (mediaPosts.length < limit && requestCount < maxRequests) {
+        // Keep fetching until we have 'limit' media posts or hit request limit
+        while (mediaPosts.length < limit && requestCount < totalMaxRequests) {
+            // Check if we’ve hit the initial request limit
+            if (requestCount === initialMaxRequests && mediaPosts.length < limit) {
+                const continueFetching = window.confirm(
+                    `Only ${mediaPosts.length} image posts found after 3 attempts. Continue fetching?`
+                );
+                if (!continueFetching) {
+                    updateStatus(`Stopped fetching: Only ${mediaPosts.length} image posts found`, true);
+                    break;
+                }
+            }
+
             const url = after ? `${baseUrl}&after=${after}` : baseUrl;
             const response = await fetch(url, {
                 headers: {
@@ -61,7 +73,12 @@ async function fetchPosts(clientId, clientSecret, subreddit, sort, limit, timeFi
             // Filter media posts (.gif, .jpg, .jpeg, .png)
             posts.forEach(post => {
                 const urlLower = post.url.toLowerCase();
-                if (urlLower.endsWith('.gif') || urlLower.endsWith('.jpg') || urlLower.endsWith('.jpeg') || urlLower.endsWith('.png')) {
+                if (
+                    urlLower.endsWith('.gif') ||
+                    urlLower.endsWith('.jpg') ||
+                    urlLower.endsWith('.jpeg') ||
+                    urlLower.endsWith('.png')
+                ) {
                     if (mediaPosts.length < limit) {
                         mediaPosts.push(post);
                     } else {
@@ -77,13 +94,13 @@ async function fetchPosts(clientId, clientSecret, subreddit, sort, limit, timeFi
             requestCount++;
             if (!after) break; // No more pages available
 
-            updateStatus(`Fetched ${mediaPosts.length}/${limit} media posts...`);
+            updateStatus(`Fetched ${mediaPosts.length}/${limit} image posts...`);
             // Add delay to respect rate limits
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
 
-        updateStatus(`Successfully fetched ${mediaPosts.length} media posts`);
-        return { mediaPosts, nonMediaPosts: nonMediaPosts.slice(0, 50) }; // Limit non-media posts
+        updateStatus(`Successfully fetched ${mediaPosts.length} image posts`);
+        return { mediaPosts, nonMediaPosts };
     } catch (error) {
         updateStatus(`Error fetching posts: ${error.message}`, true);
         return { mediaPosts: [], nonMediaPosts: [] };
@@ -161,11 +178,11 @@ async function displayMedia() {
 
     // Warn if fewer than limit media posts were found
     if (mediaPosts.length < limit) {
-        updateStatus(`Only ${mediaPosts.length} media posts found`, true);
+        updateStatus(`Only ${mediaPosts.length} image posts found`, true);
     }
 }
 
-// Update layout IRONand thumbnail size
+// Function to update layout and thumbnail size
 function updateLayout() {
     const layout = document.querySelector('.layout-button.active')?.dataset.layout || 'grid';
     const columns = document.getElementById('columns-slider').value;
